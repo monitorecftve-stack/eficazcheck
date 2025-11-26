@@ -49,3 +49,47 @@ export const analyzeDiscrepancies = async (order: Order): Promise<string> => {
     return "Erro ao conectar com o serviço de IA para análise.";
   }
 };
+
+export const editImageWithGemini = async (base64Image: string, prompt: string): Promise<string | null> => {
+  const client = getClient();
+  if (!client) {
+      console.error("API Key missing");
+      return null;
+  }
+
+  try {
+    // Extract base64 data if it includes the header
+    const cleanBase64 = base64Image.includes(',') ? base64Image.split(',')[1] : base64Image;
+
+    const response = await client.models.generateContent({
+      model: 'gemini-2.5-flash-image',
+      contents: {
+        parts: [
+          {
+            inlineData: {
+              mimeType: 'image/jpeg', // Standardizing on jpeg for upload
+              data: cleanBase64,
+            },
+          },
+          {
+            text: prompt,
+          },
+        ],
+      },
+    });
+
+    // Check parts for image data
+    if (response.candidates?.[0]?.content?.parts) {
+        for (const part of response.candidates[0].content.parts) {
+            if (part.inlineData && part.inlineData.data) {
+                return `data:image/png;base64,${part.inlineData.data}`;
+            }
+        }
+    }
+    
+    return null;
+  } catch (error) {
+    console.error("Gemini Image Edit Error:", error);
+    return null;
+  }
+};

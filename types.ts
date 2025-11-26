@@ -3,12 +3,19 @@ export enum OrderStatus {
   IN_PROGRESS = 'IN_PROGRESS',
   COMPLETED = 'COMPLETED',
   COMPLETED_WITH_ERRORS = 'COMPLETED_WITH_ERRORS',
-  RETURNED = 'RETURNED' // Novo status para devoluções
+  RETURNED = 'RETURNED'
+}
+
+export interface User {
+  username: string;
+  name: string;
+  role: 'admin' | 'user';
 }
 
 export interface ProductItem {
   sku: string;
   name: string;
+  variant?: string;
   quantityRequested: number;
   quantityScanned: number;
   image?: string;
@@ -39,7 +46,7 @@ export interface Order {
   createdAt: string;
   sessionData?: ConferenceSession;
   correctionHistory?: CorrectionLog[];
-  returnHistory?: ReturnEvent[]; // Histórico de devoluções
+  returnHistory?: ReturnEvent[];
 }
 
 export interface ConferenceSession {

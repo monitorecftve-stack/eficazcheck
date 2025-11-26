@@ -11,16 +11,18 @@ import {
     Save, 
     History as HistoryIcon,
     RotateCcw,
-    Truck
+    Truck,
+    Zap
 } from 'lucide-react';
 
 interface HistoryLogProps {
   orders: Order[];
   onCorrectOrder?: (orderId: string, itemId: string, newQuantity: number, reason: string, user: string) => void;
   onReturnOrder?: (orderId: string, reason: string, driverName: string) => void;
+  onReopenConference?: (orderId: string) => void;
 }
 
-const HistoryLog: React.FC<HistoryLogProps> = ({ orders, onCorrectOrder, onReturnOrder }) => {
+const HistoryLog: React.FC<HistoryLogProps> = ({ orders, onCorrectOrder, onReturnOrder, onReopenConference }) => {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [isCorrectionMode, setIsCorrectionMode] = useState(false);
   
@@ -208,8 +210,8 @@ const HistoryLog: React.FC<HistoryLogProps> = ({ orders, onCorrectOrder, onRetur
                 </div>
 
                 <div className="p-6 flex-1 overflow-y-auto">
-                    {/* Botão de Registrar Retorno */}
-                    {selectedOrder.status !== OrderStatus.RETURNED && (
+                    {/* Botão de Registrar Retorno OU Ação de Reconferência */}
+                    {selectedOrder.status !== OrderStatus.RETURNED ? (
                         <div className="mb-6 p-4 bg-orange-50 border border-orange-200 rounded-lg flex items-center justify-between">
                             <div>
                                 <h4 className="font-bold text-orange-800 flex items-center"><RotateCcw size={18} className="mr-2"/> Logística Reversa</h4>
@@ -221,6 +223,21 @@ const HistoryLog: React.FC<HistoryLogProps> = ({ orders, onCorrectOrder, onRetur
                             >
                                 Registrar Retorno
                             </button>
+                        </div>
+                    ) : (
+                        <div className="mb-6 p-4 bg-orange-100 border border-orange-300 rounded-lg flex flex-col sm:flex-row items-center justify-between gap-4">
+                             <div>
+                                <h4 className="font-bold text-orange-900 flex items-center"><RotateCcw size={18} className="mr-2"/> Pedido Devolvido</h4>
+                                <p className="text-sm text-orange-800">Aguardando nova conferência de saída.</p>
+                            </div>
+                            {onReopenConference && (
+                                <button 
+                                    onClick={() => onReopenConference(selectedOrder.id)}
+                                    className="w-full sm:w-auto bg-orange-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-orange-700 transition-colors shadow-lg flex items-center justify-center animate-pulse"
+                                >
+                                    <Zap size={18} className="mr-2" /> Iniciar Reconferência
+                                </button>
+                            )}
                         </div>
                     )}
 

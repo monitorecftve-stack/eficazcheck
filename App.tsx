@@ -11,7 +11,8 @@ import {
   Wifi,
   WifiOff,
   RefreshCw,
-  ArrowLeft
+  ArrowLeft,
+  Image as ImageIcon
 } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
 import ImportOrders from './pages/ImportOrders';
@@ -19,8 +20,11 @@ import ConferenceFlow from './pages/ConferenceFlow';
 import HistoryLog from './pages/HistoryLog';
 import Reports from './pages/Reports';
 import SettingsPage from './pages/Settings';
-import { Order, OrderStatus, ProductItem, CorrectionLog, ReturnEvent } from './types';
+import ImageEditor from './pages/ImageEditor';
+import Login from './pages/Login';
+import { Order, OrderStatus, ProductItem, CorrectionLog, ReturnEvent, User } from './types';
 import { initDB, getAllOrders, saveOrder, saveAllOrders } from './services/storageService';
+import { getCurrentUser, logout } from './services/authService';
 
 // Mock Data Initialization (Fallback only)
 const INITIAL_ORDERS_FALLBACK: Order[] = [
@@ -44,7 +48,7 @@ const INITIAL_ORDERS_FALLBACK: Order[] = [
     createdAt: new Date(Date.now() - 86400000).toISOString(),
     sessionData: {
         separatorName: 'João Silva',
-        conferenteName: 'Maria Oliveira',
+        conferenteName: 'Carlos Silva',
         driverName: 'Carlos Souza',
         vehiclePlate: 'ABC-1234',
         startTime: new Date(Date.now() - 87000000).toISOString(),
@@ -59,7 +63,11 @@ const INITIAL_ORDERS_FALLBACK: Order[] = [
 ];
 
 const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'import' | 'conference' | 'history' | 'reports' | 'settings'>('dashboard');
+  // Auth State
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+
+  // App State
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'import' | 'conference' | 'history' | 'reports' | 'settings' | 'image-editor'>('dashboard');
   const [orders, setOrders] = useState<Order[]>([]);
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   
@@ -71,17 +79,33 @@ const App: React.FC = () => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [dbReady, setDbReady] = useState(false);
 
+  // Initial Auth Check
+  useEffect(() => {
+    const user = getCurrentUser();
+    if (user) {
+        setCurrentUser(user);
+    }
+  }, []);
+
+  const handleLoginSuccess = (user: User) => {
+    setCurrentUser(user);
+    setActiveTab('dashboard');
+  };
+
+  const handleLogout = () => {
+    logout();
+    setCurrentUser(null);
+  };
+
   const fetchOrders = useCallback(async () => {
     try {
         const storedOrders = await getAllOrders();
         if (storedOrders.length > 0) {
             setOrders(storedOrders);
         } else if (!dbReady) {
-            // Seed initial data if DB is empty only on first load
             setOrders(INITIAL_ORDERS_FALLBACK);
             await saveAllOrders(INITIAL_ORDERS_FALLBACK);
         } else {
-            // DB is ready but empty (e.g. after clear), set empty array
             setOrders([]);
         }
     } catch (err) {
@@ -91,6 +115,8 @@ const App: React.FC = () => {
 
   // Initialize DB and Network Listeners
   useEffect(() => {
+    if (!currentUser) return; // Don't init DB until logged in (optimization)
+
     const handleStatusChange = () => setIsOnline(navigator.onLine);
     window.addEventListener('online', handleStatusChange);
     window.addEventListener('offline', handleStatusChange);
@@ -99,7 +125,6 @@ const App: React.FC = () => {
         try {
             await initDB();
             setDbReady(true);
-            // Fetch initial orders
             const storedOrders = await getAllOrders();
             if (storedOrders.length > 0) {
                 setOrders(storedOrders);
@@ -109,7 +134,6 @@ const App: React.FC = () => {
             }
         } catch (err) {
             console.error("Failed to initialize database", err);
-            // Fallback to memory
             setOrders(INITIAL_ORDERS_FALLBACK);
         }
     };
@@ -120,25 +144,21 @@ const App: React.FC = () => {
       window.removeEventListener('online', handleStatusChange);
       window.removeEventListener('offline', handleStatusChange);
     };
-  }, []);
+  }, [currentUser]);
 
   // Sync effect (Simulation)
   useEffect(() => {
-      if (isOnline && dbReady) {
-          // Simulate background sync to "Server"
+      if (isOnline && dbReady && currentUser) {
           setIsSyncing(true);
           const timer = setTimeout(() => setIsSyncing(false), 2000);
           return () => clearTimeout(timer);
       }
-  }, [isOnline, orders, dbReady]);
+  }, [isOnline, orders, dbReady, currentUser]);
 
   // --- CRUD Operations with Persistence ---
 
   const updateOrder = async (updatedOrder: Order) => {
-    // 1. Update React State
     setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
-    
-    // 2. Update Local DB
     try {
         await saveOrder(updatedOrder);
     } catch (e) {
@@ -147,16 +167,12 @@ const App: React.FC = () => {
   };
 
   const addOrders = async (newOrders: Order[]) => {
-    // 1. Update React State
     setOrders(prev => [...prev, ...newOrders]);
-    
-    // 2. Update Local DB
     try {
         await saveAllOrders(newOrders);
     } catch (e) {
         console.error("Failed to save new orders offline", e);
     }
-    
     setActiveTab('dashboard');
   };
 
@@ -172,7 +188,6 @@ const App: React.FC = () => {
           return prevOrders.map(order => {
               if (order.id !== orderId) return order;
 
-              // Find item and create log
               const itemIndex = order.items.findIndex(i => i.sku === itemId);
               if (itemIndex === -1) return order;
 
@@ -204,7 +219,6 @@ const App: React.FC = () => {
           });
       });
 
-      // Persist the specific updated order
       if (updatedOrder) {
           try {
               await saveOrder(updatedOrder);
@@ -216,34 +230,25 @@ const App: React.FC = () => {
 
   const handleOrderReturn = async (orderId: string, reason: string, driverName: string) => {
       let updatedOrder: Order | null = null;
-
       setOrders(prevOrders => {
           return prevOrders.map(order => {
               if (order.id !== orderId) return order;
-
               const returnEvent: ReturnEvent = {
                   date: new Date().toISOString(),
                   reason: reason,
                   driverName: driverName,
-                  registeredBy: 'Sistema'
+                  registeredBy: currentUser?.name || 'Sistema'
               };
-
               updatedOrder = {
                   ...order,
-                  status: OrderStatus.RETURNED, // Mark as Returned so it shows up in Conference again
+                  status: OrderStatus.RETURNED,
                   returnHistory: [...(order.returnHistory || []), returnEvent]
               };
-
               return updatedOrder;
           });
       });
-
       if (updatedOrder) {
-          try {
-              await saveOrder(updatedOrder);
-          } catch (e) {
-              console.error("Failed to save return status", e);
-          }
+          try { await saveOrder(updatedOrder); } catch (e) {}
       }
   };
 
@@ -258,11 +263,17 @@ const App: React.FC = () => {
       setSelectedOrderId(null);
   };
 
+  // --- Render Logic ---
+
+  if (!currentUser) {
+      return <Login onLoginSuccess={handleLoginSuccess} />;
+  }
+
   if (!dbReady) {
       return (
           <div className="flex h-screen items-center justify-center bg-gray-100 flex-col">
               <RefreshCw className="animate-spin text-brand-600 mb-4" size={40} />
-              <p className="text-gray-600">Carregando banco de dados local...</p>
+              <p className="text-gray-600">Inicializando sistema...</p>
           </div>
       );
   }
@@ -276,45 +287,36 @@ const App: React.FC = () => {
             <PackageCheck size={24} className="text-white" />
           </div>
           <div>
-            <h1 className="text-xl font-bold tracking-tight">ConfereX</h1>
+            <h1 className="text-lg font-bold tracking-tight">Confere Eficaz</h1>
             <p className="text-xs text-gray-400">Logística Inteligente</p>
           </div>
         </div>
 
-        <nav className="flex-1 py-6 space-y-1 px-3">
-          <SidebarItem 
-            icon={<LayoutDashboard size={20} />} 
-            label="Dashboard" 
-            active={activeTab === 'dashboard'} 
-            onClick={() => setActiveTab('dashboard')} 
-          />
-          <SidebarItem 
-            icon={<BarChart3 size={20} />} 
-            label="Relatórios" 
-            active={activeTab === 'reports'} 
-            onClick={() => setActiveTab('reports')} 
-          />
-          <SidebarItem 
-            icon={<FileInput size={20} />} 
-            label="Importar Pedidos" 
-            active={activeTab === 'import'} 
-            onClick={() => setActiveTab('import')} 
-          />
-          <SidebarItem 
-            icon={<PackageCheck size={20} />} 
-            label="Conferência" 
-            active={activeTab === 'conference'} 
-            onClick={() => setActiveTab('conference')} 
-          />
-          <SidebarItem 
-            icon={<History size={20} />} 
-            label="Histórico" 
-            active={activeTab === 'history'} 
-            onClick={() => setActiveTab('history')} 
-          />
+        <div className="px-6 py-4 border-b border-gray-800">
+             <div className="flex items-center space-x-3">
+                 <div className="bg-gray-700 rounded-full p-2">
+                     <div className="font-bold text-sm text-white">{currentUser.name.charAt(0)}</div>
+                 </div>
+                 <div className="overflow-hidden">
+                     <p className="text-sm font-medium text-white truncate">{currentUser.name}</p>
+                     <button onClick={handleLogout} className="text-xs text-red-400 hover:text-red-300 flex items-center mt-0.5">
+                         <LogOut size={10} className="mr-1" /> Sair
+                     </button>
+                 </div>
+             </div>
+        </div>
+
+        <nav className="flex-1 py-4 space-y-1 px-3">
+          <SidebarItem icon={<LayoutDashboard size={20} />} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
+          <SidebarItem icon={<BarChart3 size={20} />} label="Relatórios" active={activeTab === 'reports'} onClick={() => setActiveTab('reports')} />
+          <SidebarItem icon={<FileInput size={20} />} label="Importar Pedidos" active={activeTab === 'import'} onClick={() => setActiveTab('import')} />
+          <SidebarItem icon={<PackageCheck size={20} />} label="Conferência" active={activeTab === 'conference'} onClick={() => setActiveTab('conference')} />
+          <SidebarItem icon={<History size={20} />} label="Histórico" active={activeTab === 'history'} onClick={() => setActiveTab('history')} />
+          <div className="pt-4 mt-2 border-t border-gray-800/50">
+             <SidebarItem icon={<ImageIcon size={20} />} label="Editor IA" active={activeTab === 'image-editor'} onClick={() => setActiveTab('image-editor')} />
+          </div>
         </nav>
 
-        {/* System Status in Sidebar */}
         <div className="px-4 pb-4">
              <div className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-xs font-medium ${isOnline ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}`}>
                  {isOnline ? <Wifi size={14} /> : <WifiOff size={14} />}
@@ -323,12 +325,8 @@ const App: React.FC = () => {
         </div>
 
         <div className="p-4 border-t border-gray-800">
-          <button 
-            onClick={() => setActiveTab('settings')}
-            className={`flex items-center space-x-3 w-full transition-colors p-2 rounded-md ${activeTab === 'settings' ? 'bg-gray-800 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`}
-          >
-            <Settings size={20} />
-            <span>Configurações</span>
+          <button onClick={() => setActiveTab('settings')} className={`flex items-center space-x-3 w-full transition-colors p-2 rounded-md ${activeTab === 'settings' ? 'bg-gray-800 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`}>
+            <Settings size={20} /><span>Configurações</span>
           </button>
         </div>
       </aside>
@@ -338,7 +336,7 @@ const App: React.FC = () => {
          {activeTab === 'dashboard' ? (
              <div className="flex items-center space-x-2">
                  <PackageCheck className="text-brand-500" size={24} />
-                 <span className="font-bold text-lg">ConfereX</span>
+                 <span className="font-bold text-lg">Confere Eficaz</span>
              </div>
          ) : (
              <button onClick={goBackToDashboard} className="flex items-center space-x-1 text-gray-300 hover:text-white">
@@ -360,19 +358,25 @@ const App: React.FC = () => {
       {/* Mobile Menu Overlay */}
       {mobileMenuOpen && (
           <div className="fixed inset-0 z-50 bg-dark-900 text-white flex flex-col animate-in fade-in duration-200">
-              <div className="flex justify-end p-4">
+              <div className="flex justify-between items-center p-4 border-b border-gray-800">
+                  <span className="font-bold text-lg text-gray-300">Menu</span>
                   <button onClick={() => setMobileMenuOpen(false)} className="p-2 bg-gray-800 rounded-full">
                       <LogOut size={20} />
                   </button>
               </div>
-              <div className="flex-1 flex flex-col items-center justify-center space-y-6 p-8">
-                  <h2 className="text-2xl font-bold mb-8 text-brand-500">Menu Principal</h2>
-                  <button onClick={() => navigateTo('dashboard')} className="text-xl font-medium w-full text-center py-4 border-b border-gray-800">Dashboard</button>
-                  <button onClick={() => navigateTo('conference')} className="text-xl font-medium w-full text-center py-4 border-b border-gray-800">Conferência</button>
-                  <button onClick={() => navigateTo('import')} className="text-xl font-medium w-full text-center py-4 border-b border-gray-800">Importar Pedidos</button>
-                  <button onClick={() => navigateTo('history')} className="text-xl font-medium w-full text-center py-4 border-b border-gray-800">Histórico</button>
-                  <button onClick={() => navigateTo('reports')} className="text-xl font-medium w-full text-center py-4 border-b border-gray-800">Relatórios</button>
-                  <button onClick={() => navigateTo('settings')} className="text-xl font-medium w-full text-center py-4 text-gray-400">Configurações</button>
+              <div className="p-6 bg-gray-800 mb-2">
+                   <p className="text-gray-400 text-xs uppercase">Logado como</p>
+                   <p className="font-bold text-xl text-white">{currentUser.name}</p>
+                   <button onClick={handleLogout} className="mt-2 text-sm text-red-400 font-medium border border-red-900/50 bg-red-900/20 px-3 py-1 rounded">Sair da Conta</button>
+              </div>
+              <div className="flex-1 flex flex-col space-y-2 p-4">
+                  <button onClick={() => navigateTo('dashboard')} className="text-lg font-medium w-full text-left py-4 border-b border-gray-800">Dashboard</button>
+                  <button onClick={() => navigateTo('conference')} className="text-lg font-medium w-full text-left py-4 border-b border-gray-800">Conferência</button>
+                  <button onClick={() => navigateTo('import')} className="text-lg font-medium w-full text-left py-4 border-b border-gray-800">Importar Pedidos</button>
+                  <button onClick={() => navigateTo('history')} className="text-lg font-medium w-full text-left py-4 border-b border-gray-800">Histórico</button>
+                  <button onClick={() => navigateTo('reports')} className="text-lg font-medium w-full text-left py-4 border-b border-gray-800">Relatórios</button>
+                  <button onClick={() => navigateTo('image-editor')} className="text-lg font-medium w-full text-left py-4 border-b border-gray-800">Editor IA</button>
+                  <button onClick={() => navigateTo('settings')} className="text-lg font-medium w-full text-left py-4 text-gray-400">Configurações</button>
               </div>
           </div>
       )}
@@ -395,6 +399,7 @@ const App: React.FC = () => {
           <ConferenceFlow 
             orders={orders} 
             preSelectedOrderId={selectedOrderId}
+            currentUser={currentUser}
             onUpdateOrder={updateOrder}
             onBack={() => {
               setSelectedOrderId(null);
@@ -407,7 +412,11 @@ const App: React.FC = () => {
             orders={orders} 
             onCorrectOrder={handleCorrection}
             onReturnOrder={handleOrderReturn}
+            onReopenConference={handleStartConference}
           />
+        )}
+        {activeTab === 'image-editor' && (
+            <ImageEditor />
         )}
         {activeTab === 'settings' && (
           <SettingsPage 
